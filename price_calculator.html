@@ -3,62 +3,140 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Price Calculator</title>
+    <title>File Compressor - Images & PDFs</title>
     <style>
         body {
             font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        form {
+            background: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
             max-width: 600px;
             margin: auto;
-            padding: 20px;
         }
-        input {
-            width: 100%;
-            padding: 10px;
+        input[type="file"], input[type="number"], input[type="submit"] {
+            display: block;
             margin: 10px 0;
-            box-sizing: border-box;
-        }
-        button {
-            padding: 10px;
-            background-color: #007BFF;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #0056b3;
+            width: 100%;
         }
         .output {
             margin-top: 20px;
         }
-        .output p {
-            background: #f9f9f9;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        .cost-price {
-            color: red;
-        }
-        .final-panel-discount {
-            color: green;
-        }
     </style>
 </head>
 <body>
-    <h1>Price Calculator</h1>
-    <label for="dropshipPrice">Dropship Price:</label>
-    <input type="number" id="dropshipPrice" placeholder="Enter Dropship Price" step="0.01">
-    <label for="dropshipDiscount">Dropship Discount:</label>
-    <input type="number" id="dropshipDiscount" placeholder="Enter Dropship Discount %" step="0.01">
-    <button onclick="calculate()">Calculate</button>
-    <div class="output">
-        <p id="costPrice" class="cost-price"></p>
-        <p id="finalPanelDiscount" class="final-panel-discount"></p>
-        <p id="panelPrice"></p>
-        <p id="panelDiscountNo"></p>
-        <p id="estimatedNumber"></p>
-        <p id="finalWebsitePrice"></p>
-    </div>
-    <script src="script.js"></script>
+    <h1>File Compressor</h1>
+    <form id="compressForm">
+        <label for="file">Choose an image or PDF file:</label>
+        <input type="file" id="file" accept="image/*,application/pdf" required><br>
+        <label for="limit">Set output limit (KB):</label>
+        <input type="number" id="limit" required><br>
+        <input type="submit" value="Compress">
+    </form>
+    <div class="output" id="output"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.16.0"></script> <!-- Include pdf-lib for PDF manipulation -->
+
+    <script>
+        document.getElementById('compressForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('file');
+            const limitKB = parseInt(document.getElementById('limit').value);
+            const file = fileInput.files[0];
+
+            if (file) {
+                if (file.type.startsWith('image/')) {
+                    compressImage(file, limitKB);
+                } else if (file.type === 'application/pdf') {
+                    compressPDF(file, limitKB);
+                } else {
+                    alert('Unsupported file type. Please upload an image or PDF.');
+                }
+            }
+        });
+
+        function compressImage(file, limitKB) {
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                const img = new Image();
+                img.onload = function () {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    const maxWidth = 800;
+                    const scaleSize = Math.min(maxWidth / img.width, 1);
+                    canvas.width = img.width * scaleSize;
+                    canvas.height = img.height * scaleSize;
+
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                    let quality = 0.8;
+                    compressCanvasToBlob(canvas, quality, limitKB);
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function compressCanvasToBlob(canvas, quality, limitKB) {
+            canvas.toBlob(function (blob) {
+                const fileSizeKB = blob.size / 1024;
+                if (fileSizeKB <= limitKB) {
+                    const url = URL.createObjectURL(blob);
+                    const output = document.getElementById('output');
+                    output.innerHTML = `<p>Image compressed successfully! <a href="${url}" download="compressed_image.jpg">Download compressed image</a></p>`;
+                } else if (quality > 0.1) {
+                    compressCanvasToBlob(canvas, quality - 0.1, limitKB);
+                } else {
+                    const output = document.getElementById('output');
+                    output.innerHTML = `<p>Unable to compress image to the desired size. Try a higher limit.</p>`;
+                }
+            }, 'image/jpeg', quality);
+        }
+
+        async function compressPDF(file, limitKB) {
+            const reader = new FileReader();
+            reader.onload = async function (event) {
+                const pdfDoc = await PDFLib.PDFDocument.load(event.target.result);
+                const pages = pdfDoc.getPages();
+
+                // For each page, try compressing images (this is a basic approach and not full compression)
+                for (const page of pages) {
+                    const { width, height } = page.getSize();
+                    const imgElements = await page.getImages();
+                    for (const imgElement of imgElements) {
+                        const imgWidth = imgElement.width;
+                        const imgHeight = imgElement.height;
+
+                        // Resize the image if it's larger than max size
+                        if (imgWidth > 800 || imgHeight > 800) {
+                            const aspectRatio = imgWidth / imgHeight;
+                            const newWidth = Math.min(imgWidth, 800);
+                            const newHeight = newWidth / aspectRatio;
+                            imgElement.resize(newWidth, newHeight);
+                        }
+                    }
+                }
+
+                const pdfBytes = await pdfDoc.save();
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const fileSizeKB = blob.size / 1024;
+
+                if (fileSizeKB <= limitKB) {
+                    const url = URL.createObjectURL(blob);
+                    const output = document.getElementById('output');
+                    output.innerHTML = `<p>PDF compressed successfully! <a href="${url}" download="compressed_pdf.pdf">Download compressed PDF</a></p>`;
+                } else {
+                    alert(`PDF compression is limited in this tool. The resulting size is ${fileSizeKB.toFixed(2)} KB. Consider using a larger size limit.`);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+    </script>
 </body>
 </html>
